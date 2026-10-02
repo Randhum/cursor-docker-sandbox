@@ -80,7 +80,7 @@ Saves to `${APPIMAGE_HOST_DIR}/${APPIMAGE_FILENAME}`.
 ./build.sh
 ```
 
-Creates `${PERSIST_BASE}/{config,cache,cursor,mozilla}` and builds the image with X11, Mesa software GL, D-Bus, Firefox, FUSE.
+Creates `${PERSIST_BASE}/{config,cache,cursor,mozilla}` and builds the image with X11, Mesa software GL, D-Bus, Firefox and a Python 3.14 environment. The image contains **no FUSE dependencies** -- the AppImage is launched via `--appimage-extract`, so `/dev/fuse` and `SYS_ADMIN` are not needed and the sandbox works in a **Docker rootless** environment.
 
 ---
 
@@ -89,13 +89,12 @@ Creates `${PERSIST_BASE}/{config,cache,cursor,mozilla}` and builds the image wit
 Most reliable command on corporate and NFS setups:
 
 ```bash
-./start.sh --as-owner --userns-host
+./start.sh --as-owner
 ```
 
 What these flags do:
 
 * `--as-owner` runs the app as the owner uid,gid of the first RW bind, matching host permissions
-* `--userns-host` disables user namespace remapping so the kernel sees the same uid,gid over NFS
 
 Other useful flags:
 
@@ -106,8 +105,8 @@ Examples:
 
 ```bash
 ./start.sh
-./start.sh --as-owner --userns-host
-./start.sh --clean --as-owner --userns-host
+./start.sh --as-owner
+./start.sh --clean --as-owner
 ```
 
 SSH X forwarding tips:
@@ -121,7 +120,7 @@ SSH X forwarding tips:
 
 1. `start.sh` parses bind lists, sets up X11, passes your `DISPLAY`
 2. `verify_fs.sh` confirms RO cannot be written, RW can be written, and an exec tmpfs works
-3. `run_cursor.sh` starts a session D-Bus and launches the AppImage with software GL
+3. `run_cursor.sh` starts a session D-Bus, extracts the AppImage (`--appimage-extract`) and launches `AppRun` with software GL
 
 Example output:
 
@@ -154,7 +153,7 @@ rm -rf "${PERSIST_BASE}"
 Ensure `DISPLAY=localhost:N.0` and run from the same SSH session. Avoid plain `sudo`; use `sudo -E`.
 
 **On NFS, RW path says permission denied**
-Use `./start.sh --as-owner --userns-host` so the kernel sees the same uid,gid as on the host.
+Use `./start.sh --as-owner` so the kernel sees the same uid,gid as on the host.
 
 **Firefox shows “profile cannot be loaded”**
 `.mozilla` is persisted and mounted. After `--clean`, the first run recreates it. If an old unreadable profile exists, remove `${PERSIST_BASE}/mozilla`.
@@ -166,7 +165,7 @@ Export your proxy on the host so Firefox inside inherits it:
 export HTTPS_PROXY=http://proxy.example.com:3128
 export HTTP_PROXY=http://proxy.example.com:3128
 export NO_PROXY=localhost,127.0.0.1,::1
-./start.sh --as-owner --userns-host
+./start.sh --as-owner
 ```
 
 If TLS interception errors appear, place your corporate root CA PEM into `${PERSIST_BASE}/certs` and follow certificate import notes in `entry.sh`.
@@ -181,6 +180,8 @@ Benign with software GL; the Dockerfile installs `libpci3` and `libpciaccess0` t
 * Software rendering only, no GPU passthrough required
 * Firefox is installed and registered as default browser, `xdg-open` uses it
 * X11 over SSH requires valid `DISPLAY` and `XAUTHORITY` in your shell
+* FUSE-free: the AppImage is unpacked with `--appimage-extract`, so the container needs **no** `/dev/fuse`, **no** `SYS_ADMIN` and runs with `--cap-drop ALL` -- compatible with Docker rootless
+* Python 3.14 is installed from the distro and isolated in a dedicated venv at `/opt/venv` (activated via `PATH`, `VIRTUAL_ENV` set)
 
 ---
 

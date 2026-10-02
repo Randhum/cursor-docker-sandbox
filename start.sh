@@ -10,13 +10,16 @@ IMAGE_NAME="${IMAGE_NAME:-cursor-x11}"
 DO_CLEAN=0
 DO_GRANT_ACL=0
 DO_AS_OWNER=0
-DO_USERNS_HOST=0
 for arg in "$@"; do
   case "$arg" in
     --clean) DO_CLEAN=1 ;;
     --grant-acl) DO_GRANT_ACL=1 ;;
     --as-owner) DO_AS_OWNER=1 ;;
-    --userns-host) DO_USERNS_HOST=1 ;;
+    *)
+      echo "ERROR: unknown argument: $arg"
+      echo "Usage: ./start.sh [--clean] [--grant-acl] [--as-owner]"
+      exit 1
+      ;;
   esac
 done
 
@@ -109,6 +112,27 @@ else
   echo "Running container as current user (${CURRENT_USERNAME}): uid=${TARGET_UID} gid=${TARGET_GID}"
 fi
 
+# Detect rootless Docker: the daemon itself runs as an unprivileged user.
+# In rootless mode in-container root == the host user, so we run the app as
+# in-container root (see entry.sh) and mount the writable tmpfs as 0:0.
+ROOTLESS=0
+if command -v pgrep >/dev/null 2>&1; then
+  DOCKERD_PID=$(pgrep -x dockerd | head -n1 || true)
+  if [[ -n "${DOCKERD_PID}" && -d "/proc/${DOCKERD_PID}" ]]; then
+    DAEMON_UID=$(stat -c %u "/proc/${DOCKERD_PID}")
+    if [[ "${DAEMON_UID}" != "0" ]]; then
+      ROOTLESS=1
+      echo "Detected rootless Docker daemon (uid=${DAEMON_UID})"
+    fi
+  fi
+fi
+
+if [[ "${ROOTLESS}" -eq 1 ]]; then
+  TMPFS_UIDGID="uid=0,gid=0"
+else
+  TMPFS_UIDGID="uid=${TARGET_UID},gid=${TARGET_GID}"
+fi
+
 # X11 handling
 DISPLAY_VAL="${DISPLAY:-}"
 if [[ -z "$DISPLAY_VAL" ]]; then
@@ -150,7 +174,9 @@ ENV_ARGS=(
   "--env" "TARGET_UID=${TARGET_UID}"
   "--env" "TARGET_GID=${TARGET_GID}"
   "--env" "HOST_USER=${CURRENT_USERNAME}"
-)
+  "--env" "ROOTLESS=${ROOTLESS}"
+  )
+
 # Add XAUTH env if set
 if [[ -n "${ENV_XAUTH+set}" ]]; then
   ENV_ARGS+=( "${ENV_XAUTH[@]}" )
@@ -200,17 +226,22 @@ VOLUMES+=( "--volume" "${RW_LIST}:/etc/cursor-rw.list:ro" )
 # Optional extra docker args
 declare -a EXTRA_RUN_ARGS
 EXTRA_RUN_ARGS=()
-if [[ "$DO_USERNS_HOST" -eq 1 ]]; then
-  EXTRA_RUN_ARGS+=( "--userns=host" )
-fi
 
+# Rootless-friendly, hardened run profile:
+# - No --device /dev/fuse (AppImage uses --appimage-extract, see run_cursor.sh)
+# - No --cap-add SYS_ADMIN (not granted by docker rootless anyway)
+# - --cap-drop ALL: drop every capability the container would otherwise get
+# - SETUID/SETGID kept ONLY so entry.sh can drop privileges via gosu
+#   (root -> runtime user); the runtime user cannot gain anything back,
+#   chown-style ownership changes stay unavailable (entry.sh is best-effort)
+# - No apparmor:unconfined: keep the default profile for tighter confinement
 docker run --rm -it \
-  --device /dev/fuse \
-  --cap-add SYS_ADMIN \
-  --security-opt apparmor:unconfined \
+  --cap-drop ALL \
+  --cap-add SETUID \
+  --cap-add SETGID \
   --shm-size="${SHM_SIZE}" \
   --net=host \
-  --tmpfs "/home/${CURRENT_USERNAME}/writable:exec,uid=${TARGET_UID},gid=${TARGET_GID}" \
+  --tmpfs "/home/${CURRENT_USERNAME}/writable:exec,${TMPFS_UIDGID}" \
   --tmpfs "/run:uid=0,gid=0,mode=755" \
   "${ENV_ARGS[@]}" \
   "${VOLUMES[@]}" \

@@ -35,8 +35,17 @@ APPIMAGE_CONTAINER_DIR="${APPIMAGE_CONTAINER_DIR:-/appimage}"
 APPIMAGE_FILENAME="${APPIMAGE_FILENAME:-cursor.AppImage}"
 APPIMAGE_SRC="${APPIMAGE_CONTAINER_DIR%/}/${APPIMAGE_FILENAME}"
 
-cp "${APPIMAGE_SRC}" "${WRITABLE_DIR}/cursor.AppImage"
-chmod +x "${WRITABLE_DIR}/cursor.AppImage"
+# FUSE-free launch: extract the AppImage instead of mounting it.
+# Works in Docker rootless and without SYS_ADMIN or /dev/fuse.
+EXTRACT_DIR="${WRITABLE_DIR}/cursor-extracted"
+if [ ! -x "${EXTRACT_DIR}/squashfs-root/AppRun" ]; then
+  rm -rf "${EXTRACT_DIR}"
+  mkdir -p "${EXTRACT_DIR}"
+  echo "Extracting AppImage (FUSE-free mode, --appimage-extract)..."
+  (cd "${EXTRACT_DIR}" && "${APPIMAGE_SRC}" --appimage-extract)
+  chmod +x "${EXTRACT_DIR}/squashfs-root/AppRun" 2>/dev/null || true
+fi
 
-exec "${WRITABLE_DIR}/cursor.AppImage" --no-sandbox --disable-gpu
+cd "${EXTRACT_DIR}/squashfs-root"
+exec ./AppRun --no-sandbox --disable-gpu
 
