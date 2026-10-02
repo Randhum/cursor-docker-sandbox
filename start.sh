@@ -224,8 +224,14 @@ VOLUMES+=( "--volume" "${RO_LIST}:/etc/cursor-ro.list:ro" )
 VOLUMES+=( "--volume" "${RW_LIST}:/etc/cursor-rw.list:ro" )
 
 # Optional extra docker args
+# e.g. EXTRA_DOCKER_ARGS="--env CURSOR_DEBUG=0 --env CURSOR_DEBUG_STRACE=1"
 declare -a EXTRA_RUN_ARGS
 EXTRA_RUN_ARGS=()
+if [[ -n "${EXTRA_DOCKER_ARGS:-}" ]]; then
+  # Intentional word splitting: one token per flag ("--env" "KEY=VALUE" ...)
+  # shellcheck disable=SC2206
+  EXTRA_RUN_ARGS+=(${EXTRA_DOCKER_ARGS})
+fi
 
 # Rootless-friendly, hardened run profile:
 # - No --device /dev/fuse (AppImage uses --appimage-extract, see run_cursor.sh)

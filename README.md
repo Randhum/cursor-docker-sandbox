@@ -136,6 +136,37 @@ Launching Cursor AppImage with system+session D-Bus and software GL...
 
 ---
 
+## 🐞 Debug mode (verbose logging)
+
+Debug mode is **ON by default** in `run_cursor.sh` (and `entry.sh`). It enables:
+
+* `DBUS_VERBOSE=1` on the system **and** session `dbus-daemon`s (both stay
+  daemonized with `--fork`; their internal warnings are detached from the
+  terminal — important because `--nofork` here would block the script forever)
+* `ELECTRON_ENABLE_LOGGING=1` + `--enable-logging=stderr` for Chromium/Electron
+* `--vmodule="dbus*=3,login*=3,session*=2"` so the logind/session code paths log in detail
+* A **D-Bus self-check** at startup: dumps the system bus names, the `login1`
+  activation files, and prints them right before launching
+
+On top of that (off by default):
+
+* `CURSOR_DEBUG_STRACE=1` — record the app's syscalls to
+  `${CURSOR_LOG_DIR}/cursor-strace-<ts>.log`. `CURSOR_LOG_DIR` defaults to
+  `${HOME}/.local/logs`, which is **persisted** on the host (see `PERSIST_BASE`),
+  so the trace survives a container crash.
+* `CURSOR_DEBUG_CHROMIUM_V=1|2|3` — raise the global Chromium `-v` level
+
+Disable/adjust per run (the scripts are baked into the image, but these env vars are
+read at **container start**, so no rebuild is needed to toggle them):
+
+```bash
+EXTRA_DOCKER_ARGS="--env CURSOR_DEBUG=0" ./start.sh            # back to normal logging
+EXTRA_DOCKER_ARGS="--env CURSOR_DEBUG_STRACE=1" ./start.sh     # + syscall trace
+EXTRA_DOCKER_ARGS="--env CURSOR_DEBUG_CHROMIUM_V=2" ./start.sh # + Chromium -v=2
+```
+
+---
+
 ## 🧹 Cleanup
 
 Containers run with `--rm` and are removed on exit.
@@ -151,6 +182,13 @@ rm -rf "${PERSIST_BASE}"
 
 **X11 connection rejected, or platform failed to initialize**
 Ensure `DISPLAY=localhost:N.0` and run from the same SSH session. Avoid plain `sudo`; use `sudo -E`.
+
+**`ERROR:dbus/object_proxy.cc ... Failed to call method: org.freedesktop.login1.Manager.Inhibit ... Spawn.ChildExited`**
+Benign, expected in this container. The image has no `systemd-logind`, but ships the
+systemd D-Bus activation stub `/usr/share/dbus-1/system-services/org.freedesktop.login1.service`
+whose `Exec=` is literally `/bin/false`. So when Chromium asks the system bus to inhibit
+idle/suspend, `dbus-daemon` spawns `/bin/false`, it exits 1, and Chromium logs that error
+and continues. Cursor still starts. Use debug mode (below) if something *else* fails after it.
 
 **On NFS, RW path says permission denied**
 Use `./start.sh --as-owner` so the kernel sees the same uid,gid as on the host.

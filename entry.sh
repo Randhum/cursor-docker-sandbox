@@ -91,8 +91,14 @@ mkdir -p "${USER_HOME}/.mozilla"
 chown -R "${TARGET_UID}:${TARGET_GID}" "${USER_HOME}/.mozilla" 2>/dev/null || true
 
 # Start system D-Bus
+# CURSOR_DEBUG=1 (default, see run_cursor.sh) => DBUS_VERBOSE so the daemon's
+# own stderr shows every activation attempt, e.g. the org.freedesktop.login1
+# spawn that ends with "Launch helper exited with unknown return code 1".
 mkdir -p /run/dbus
 chmod 755 /run /run/dbus
+if [[ "${CURSOR_DEBUG:-1}" -eq 1 ]]; then
+  export DBUS_VERBOSE=1
+fi
 pgrep -x dbus-daemon >/dev/null 2>&1 || \
   dbus-daemon --system --address=unix:path=/run/dbus/system_bus_socket --fork
 

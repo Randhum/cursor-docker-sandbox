@@ -20,7 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Python extensions, C/C++, databases, scientific computing,
 # graphics/Electron, compression, RPC, storage, hardware, etc.
 #
-# No browsers -- Cursor provides its own browser.
+# No browsers -- Cursor provides its own browser. - A Vision newer to come true, see the evolution of browsers. Install Firefox below
 # ===================================================================
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -263,6 +263,43 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && apt-get clean
 
+ # ===================================================================
+# Firefox, from Mozilla's APT repository
+# ===================================================================
+#
+# Ubuntu's own "firefox" package is a ~76 kB stub that Pre-Depends on snapd and
+# only installs the Firefox snap. snapd cannot run in this container, so that
+# package is useless here; Mozilla's repository ships a real .deb.
+#
+# The apt pin is required, not cosmetic. Ubuntu's stub carries an epoch
+# (1:1snap1-0ubuntu8) which sorts ABOVE Mozilla's unepoched 156.0, so without a
+# higher pin priority apt would keep choosing the snap stub.
+#
+# Firefox's dependencies use pre-time_t-transition names (libgtk-3-0,
+# libasound2, libatk1.0-0, libglib2.0-0, libgcc1); on Ubuntu 26.04 these are
+# all satisfied via Provides: by the t64 packages, so no shims are needed.
+# ===================================================================
+RUN install -d -m 0755 /etc/apt/keyrings \
+ && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
+      -o /etc/apt/keyrings/packages.mozilla.org.asc \
+ && echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+      > /etc/apt/sources.list.d/mozilla.list \
+ && printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
+      > /etc/apt/preferences.d/mozilla \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends firefox \
+ && rm -rf /var/lib/apt/lists/* \
+ && apt-get clean \
+ && test -x /usr/bin/firefox \
+ && firefox --version
+
+# Register Firefox as the system-wide http/https handler, so xdg-open resolves
+# it for every runtime uid. xdg-open consults this association BEFORE $BROWSER
+# and aborts if the handler fails, so it must point at something real.
+RUN mkdir -p /etc/xdg \
+ && printf '[Default Applications]\nx-scheme-handler/http=firefox.desktop\nx-scheme-handler/https=firefox.desktop\n' \
+      > /etc/xdg/mimeapps.list
+
 
 
 # ===================================================================
@@ -382,13 +419,6 @@ COPY run_cursor.sh /home/workspace/run_cursor.sh
 RUN chmod +x /entry.sh /home/workspace/verify_fs.sh /home/workspace/run_cursor.sh \
  && chmod a+rx /home/workspace /home/workspace/run_cursor.sh \
  && chmod 1777 /home/workspace
-
-# -------------------------------------------------------------------
-# Port metadata, expose both Cursor IDE and VeloQuant Trading Monitor ports
-# -------------------------------------------------------------------
-EXPOSE 8000
-EXPOSE 8001
-EXPOSE 3000
 
 ENTRYPOINT ["/entry.sh"]
 
